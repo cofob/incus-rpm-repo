@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import time
+import urllib.error
 import urllib.request
 from releases import PUBLIC, version, needs_build
 
@@ -31,17 +32,23 @@ priority=50
 
 def verify_public(key, expected):
     # A short cache delay is allowed; never accept a different object.
+    request = urllib.request.Request(f'{PUBLIC}/{key}', headers={'User-Agent': 'incus-rpm-repo'})
+    last_error = 'SHA-256 mismatch'
     for attempt in range(6):
         try:
-            with urllib.request.urlopen(f'{PUBLIC}/{key}', timeout=120) as response:
+            with urllib.request.urlopen(request, timeout=120) as response:
                 actual = hashlib.file_digest(response, 'sha256').hexdigest()
             if actual == hashlib.sha256(expected).hexdigest():
                 return
-        except OSError:
-            pass
+            last_error = 'SHA-256 mismatch'
+        except urllib.error.HTTPError as error:
+            last_error = str(error)
+            error.close()
+        except OSError as error:
+            last_error = str(error)
         if attempt < 5:
             time.sleep(5)
-    raise RuntimeError(f'Public verification failed: {key}')
+    raise RuntimeError(f'Public verification failed: {key}: {last_error}')
 
 
 def publish(s3, bucket, snapshot, channel, run, verify=verify_public):

@@ -9,7 +9,7 @@ import urllib.error
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 from releases import select, needs_build, version, main as release_main
-from publish import publish, repo_file
+from publish import publish, repo_file, verify_public
 from prepare import go_version
 
 
@@ -69,11 +69,13 @@ class DiscoveryTests(unittest.TestCase):
 
     def test_missing_state_is_first_publication(self):
         missing = urllib.error.HTTPError('https://example.invalid', 404, 'missing', {}, None)
+        self.addCleanup(missing.close)
         output, _ = self.run_check([[release('v7.4.0')], missing])
         self.assertIn('build=true', output)
 
     def test_access_error_is_not_empty_state(self):
         denied = urllib.error.HTTPError('https://example.invalid', 403, 'denied', {}, None)
+        self.addCleanup(denied.close)
         with self.assertRaises(urllib.error.HTTPError):
             self.run_check([[release('v7.4.0')], denied])
 
@@ -81,6 +83,28 @@ class DiscoveryTests(unittest.TestCase):
         output, calls = self.run_check([[release('v7.4.0')]], ['--build-only'])
         self.assertEqual(calls, 1)
         self.assertIn('build=true', output)
+
+
+class PublicDownloadTests(unittest.TestCase):
+    def test_identifies_client_and_checks_hash(self):
+        with patch('publish.urllib.request.urlopen', return_value=io.BytesIO(b'rpm')) as fetch:
+            verify_public('package.rpm', b'rpm')
+        request = fetch.call_args.args[0]
+        self.assertEqual(request.get_header('User-agent'), 'incus-rpm-repo')
+
+    @patch('publish.time.sleep')
+    def test_http_failure_keeps_diagnostic(self, _sleep):
+        denied = urllib.error.HTTPError('https://example.invalid', 403, 'Forbidden', {}, None)
+        with patch('publish.urllib.request.urlopen', side_effect=denied) as fetch:
+            with self.assertRaisesRegex(RuntimeError, '403: Forbidden'):
+                verify_public('package.rpm', b'rpm')
+        self.assertEqual(fetch.call_count, 6)
+
+    @patch('publish.time.sleep')
+    def test_wrong_content_is_rejected(self, _sleep):
+        with patch('publish.urllib.request.urlopen', side_effect=lambda *_args, **_kwargs: io.BytesIO(b'bad')):
+            with self.assertRaisesRegex(RuntimeError, 'SHA-256 mismatch'):
+                verify_public('package.rpm', b'rpm')
 
 
 class FakeS3:
