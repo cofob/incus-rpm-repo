@@ -1,6 +1,6 @@
 # Migrate from the Incus COPR repository
 
-For an existing **EL10 x86_64** installation from `neelc/incus`.
+For an existing **EL10 x86_64 or aarch64** installation from `neelc/incus`.
 Package names, systemd units, and `/var/lib/incus` are retained.
 Do not remove Incus, delete its state, or run `incus admin init` again.
 

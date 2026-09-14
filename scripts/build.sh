@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
-[[ $(uname -m) == x86_64 ]] || { echo "This builder requires x86_64 EL10" >&2; exit 1; }
+arch=$(uname -m)
+case "$arch" in
+    x86_64|aarch64) ;;
+    *) echo "Unsupported build architecture: $arch" >&2; exit 1 ;;
+esac
 export PATH="/usr/local/go/bin:$PATH"
 export GOTOOLCHAIN=local
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -18,4 +22,4 @@ chown -R builder:builder /build
 runuser -u builder -- env PATH="$PATH" GOTOOLCHAIN=local \
   rpmbuild -ba --define "_topdir $top" --define 'dist .el10' "$top/SPECS/incus.spec"
 mkdir -p /output
-cp "$top"/RPMS/x86_64/*.rpm "$top"/SRPMS/*.rpm "$top/release.json" /output/
+cp "$top"/RPMS/"$arch"/*.rpm "$top"/SRPMS/*.rpm "$top/release.json" /output/

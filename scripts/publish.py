@@ -10,13 +10,14 @@ import time
 import urllib.error
 import urllib.request
 from releases import PUBLIC, version, needs_build
+from assemble_snapshot import ARCHITECTURES
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 def repo_file(channel):
     sections = []
-    for suffix, arch, enabled in (('', '$basearch', 1), ('-source', 'SRPMS', 0)):
+    for suffix, arch, enabled in (('', '$basearch', 1), ('-source', 'SRPMS/$basearch', 0)):
         sections.append(f'''[incus-{channel}{suffix}]
 name=Incus {channel} EL10{suffix}
 mirrorlist={PUBLIC}/channels/{channel}/el10/{arch}/mirrorlist
@@ -54,6 +55,13 @@ def verify_public(key, expected):
 def publish(s3, bucket, snapshot, channel, run, verify=verify_public):
     release = json.loads((snapshot / 'release.json').read_text())
     version(release['tag'])
+    if release.get('architectures') != list(ARCHITECTURES):
+        raise ValueError('Both architectures are required for publication')
+    for arch in ARCHITECTURES:
+        for repo in (arch, f'SRPMS/{arch}'):
+            for filename in ('repomd.xml', 'repomd.xml.asc'):
+                if not (snapshot / repo / 'repodata' / filename).is_file():
+                    raise ValueError('Missing signed repository metadata')
     state_key = f'state/{channel}.json'
     try:
         previous = json.loads(s3.get_object(Bucket=bucket, Key=state_key)['Body'].read())
@@ -77,9 +85,13 @@ def publish(s3, bucket, snapshot, channel, run, verify=verify_public):
     put('RPM-GPG-KEY-incus', (ROOT / 'keys/repository.asc').read_bytes(), True)
     put(f'incus-{channel}.repo', repo_file(channel).encode(), True)
     # Each mirrorlist changes in one S3 PUT. Old metadata and RPMs remain valid.
-    for arch in ('SRPMS', 'x86_64'):
+    paths = [*ARCHITECTURES, *(f'SRPMS/{arch}' for arch in ARCHITECTURES)]
+    for arch in paths:
         put(f'channels/{channel}/el10/{arch}/mirrorlist',
             f'{PUBLIC}/{prefix}/{arch}/\n'.encode(), True)
+    # Keep existing x86_64 source repo files working without reinstalling them.
+    put(f'channels/{channel}/el10/SRPMS/mirrorlist',
+        f'{PUBLIC}/{prefix}/SRPMS/x86_64/\n'.encode(), True)
     state = {**release, 'snapshot': prefix}
     put(state_key, (json.dumps(state) + '\n').encode(), True)
 

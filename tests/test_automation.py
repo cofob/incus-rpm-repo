@@ -10,7 +10,8 @@ import urllib.error
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 from releases import select, needs_build, version, main as release_main, RPM_RELEASE
 from publish import publish, repo_file, verify_public
-from prepare import go_version
+from prepare import go_version, go_architecture
+from assemble_snapshot import ARCHITECTURES
 from validate_artifacts import main as validate_artifacts
 from prepare_dependencies import main as prepare_dependencies
 
@@ -20,6 +21,12 @@ def release(tag, name='', **kwargs):
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_go_architectures(self):
+        self.assertEqual(go_architecture('x86_64'), 'amd64')
+        self.assertEqual(go_architecture('aarch64'), 'arm64')
+        with self.assertRaises(KeyError):
+            go_architecture('ppc64le')
+
     def test_distribution_go_version(self):
         self.assertEqual(go_version('go1.26.7 (Red Hat 1.26.7-1.el10_2)'), (1, 26, 7))
         self.assertEqual(go_version('go1.25'), (1, 25, 0))
@@ -99,7 +106,7 @@ class ArtifactTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.folder = Path(self.temp.name)
-        (self.folder / 'release.json').write_text(json.dumps({'tag': 'v7.4.0', 'rpm_release': RPM_RELEASE}))
+        (self.folder / 'release.json').write_text(json.dumps({'tag': 'v7.4.0', 'rpm_release': RPM_RELEASE, 'architecture': 'x86_64'}))
         self.identities = {}
         groups = [('incus', '7.4.0', f'{RPM_RELEASE}.el10', ['client', 'tools', 'agent']),
                   ('raft', '0.22.1', '2.el10', ['devel']), ('cowsql', '1.15.9', '3.el10', ['devel'])]
@@ -110,13 +117,31 @@ class ArtifactTests(unittest.TestCase):
                 path.touch()
                 self.identities[str(path)] = '\t'.join((package, ver, rel, arch))
 
-    def validate(self):
+    def validate(self, arch='x86_64'):
         with patch('validate_artifacts.subprocess.check_output',
                    side_effect=lambda args, **_: self.identities[args[-1]]):
-            validate_artifacts(self.folder, 'v7.4.0')
+            validate_artifacts(self.folder, 'v7.4.0', arch)
 
     def test_complete_channel_is_accepted(self):
         self.validate()
+
+    def test_arm_artifacts_and_mixed_architecture_rejection(self):
+        info = self.folder / 'release.json'
+        info.write_text(json.dumps({'tag': 'v7.4.0', 'rpm_release': RPM_RELEASE, 'architecture': 'aarch64'}))
+        for old_path, identity in list(self.identities.items()):
+            if old_path.endswith('.x86_64.rpm'):
+                new_path = old_path.replace('.x86_64.rpm', '.aarch64.rpm')
+                Path(old_path).rename(new_path)
+                self.identities[new_path] = identity.replace('x86_64', 'aarch64')
+                del self.identities[old_path]
+        self.validate('aarch64')
+        with self.assertRaisesRegex(ValueError, 'Build architecture'):
+            self.validate('x86_64')
+        path = self.folder / f'incus-7.4.0-{RPM_RELEASE}.el10.x86_64.rpm'
+        path.touch()
+        self.identities[str(path)] = f'incus\t7.4.0\t{RPM_RELEASE}.el10\tx86_64'
+        with self.assertRaisesRegex(ValueError, 'Unexpected RPM architecture'):
+            self.validate('aarch64')
 
     def test_missing_dependency_and_source_are_rejected(self):
         for name in ('raft-0.22.1-2.el10.x86_64.rpm', 'cowsql-1.15.9-3.el10.src.rpm'):
@@ -185,8 +210,14 @@ class PublicationTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.snapshot = Path(self.temp.name)
-        (self.snapshot / 'release.json').write_text(json.dumps({'tag': 'v7.4.0', 'rpm_release': RPM_RELEASE}))
+        (self.snapshot / 'release.json').write_text(json.dumps({'tag': 'v7.4.0', 'rpm_release': RPM_RELEASE, 'architectures': list(ARCHITECTURES)}))
         (self.snapshot / 'rpm').write_bytes(b'rpm')
+        for arch in ARCHITECTURES:
+            for repo in (arch, f'SRPMS/{arch}'):
+                path = self.snapshot / repo / 'repodata'
+                path.mkdir(parents=True)
+                for name in ('repomd.xml', 'repomd.xml.asc'):
+                    (path / name).write_text('metadata')
         self.s3 = FakeS3()
 
     def test_state_last_and_no_repeat(self):
@@ -233,6 +264,20 @@ class PublicationTests(unittest.TestCase):
         self.assertIn('gpgcheck=1', text)
         self.assertIn('repo_gpgcheck=1', text)
         self.assertNotIn('snapshots/', text)
+        self.assertIn('/SRPMS/$basearch/mirrorlist', text)
+
+    def test_all_architecture_pointers_and_legacy_source_pointer(self):
+        publish(self.s3, 'bucket', self.snapshot, 'latest', '1-1', lambda *_: None)
+        for arch in ARCHITECTURES:
+            self.assertIn(f'channels/latest/el10/{arch}/mirrorlist', self.s3.objects)
+            self.assertIn(f'channels/latest/el10/SRPMS/{arch}/mirrorlist', self.s3.objects)
+        self.assertTrue(self.s3.objects['channels/latest/el10/SRPMS/mirrorlist'].endswith(b'/SRPMS/x86_64/\n'))
+
+    def test_missing_arm_metadata_prevents_any_upload(self):
+        (self.snapshot / 'aarch64/repodata/repomd.xml.asc').unlink()
+        with self.assertRaisesRegex(ValueError, 'Missing signed'):
+            publish(self.s3, 'bucket', self.snapshot, 'latest', '1-1', lambda *_: None)
+        self.assertFalse(self.s3.writes)
 
 
 if __name__ == '__main__':

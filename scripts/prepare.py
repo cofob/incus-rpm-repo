@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import platform
 from pathlib import Path
 import re
 import shutil
@@ -30,7 +31,13 @@ def go_version(value):
     return fields + (0,) * (3 - len(fields))
 
 
+def go_architecture(arch):
+    return {"x86_64": "amd64", "aarch64": "arm64"}[arch]
+
+
 def main(tag, top):
+    architecture = platform.machine()
+    go_arch = go_architecture(architecture)
     major, minor, patch = version(tag)
     top = Path(top).resolve()
     for folder in ('SOURCES', 'SPECS', 'BUILD', 'RPMS', 'SRPMS'):
@@ -65,7 +72,7 @@ def main(tag, top):
                    r['version'].startswith('go' + '.'.join(required.split('.')[:2]) + '.') and
                    go_version(r['version']) >= go_version(required)]
         release = max(choices, key=lambda r: go_version(r['version']))
-        asset = next(f for f in release['files'] if f['os'] == 'linux' and f['arch'] == 'amd64' and f['kind'] == 'archive')
+        asset = next(f for f in release['files'] if f['os'] == 'linux' and f['arch'] == go_arch and f['kind'] == 'archive')
         path = top / 'go.tar.gz'
         download('https://go.dev/dl/' + asset['filename'], path)
         if hashlib.sha256(path.read_bytes()).hexdigest() != asset['sha256']:
@@ -79,7 +86,7 @@ def main(tag, top):
             f'%global has_lxd_migrate {int(has_migrate)}\n' + spec)
     (top / 'SPECS/incus.spec').write_text(spec)
     (top / 'release.json').write_text(json.dumps({'tag': tag, 'source_sha256': hashlib.sha256(source.read_bytes()).hexdigest(),
-                                               'go_minimum': required, 'rpm_release': RPM_RELEASE}) + '\n')
+                                               'go_minimum': required, 'rpm_release': RPM_RELEASE, 'architecture': architecture}) + '\n')
 
 
 if __name__ == '__main__':

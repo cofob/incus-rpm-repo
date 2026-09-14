@@ -52,7 +52,17 @@ jobs:
     name: Build and test RPMs
     needs: check
     if: needs.check.outputs.build == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            platform: linux/amd64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
     timeout-minutes: 120
     permissions:
       contents: read
@@ -63,21 +73,24 @@ jobs:
       - name: Build and test EL10 packages
         env:
           TAG: ${{ needs.check.outputs.tag }}
+          PLATFORM: ${{ matrix.platform }}
         run: |
           mkdir -p dist
-          docker run --rm --platform linux/amd64 \
+          docker run --rm --platform "$PLATFORM" \
             -v "$PWD:/work:ro" -v "$PWD/dist:/output" \
             quay.io/rockylinux/rockylinux:10@sha256:827d37bc128288ccf160ee318bb3cb92d591164cb217e92f8bc61e3982ae1834 \
             bash /work/scripts/build.sh "$TAG"
       - name: Test installation
+        env:
+          PLATFORM: ${{ matrix.platform }}
         run: |
-          docker run --rm --platform linux/amd64 \
+          docker run --rm --platform "$PLATFORM" \
             -v "$PWD:/work:ro" -v "$PWD/dist:/packages:ro" \
             quay.io/rockylinux/rockylinux:10@sha256:827d37bc128288ccf160ee318bb3cb92d591164cb217e92f8bc61e3982ae1834 \
             bash /work/scripts/smoke.sh
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: rpm-${{ inputs.channel }}
+          name: rpm-${{ inputs.channel }}-${{ matrix.arch }}
           path: dist/
           if-no-files-found: error
           retention-days: 14
@@ -95,7 +108,7 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: rpm-${{ inputs.channel }}
+          pattern: rpm-${{ inputs.channel }}-*
           path: dist
       - name: Install signing tools
         run: |
@@ -106,12 +119,21 @@ jobs:
       - name: Validate build identity
         env:
           TAG: ${{ needs.check.outputs.tag }}
-        run: python3 scripts/validate_artifacts.py dist "$TAG"
+          CHANNEL: ${{ inputs.channel }}
+        run: |
+          for arch in x86_64 aarch64; do
+            python3 scripts/validate_artifacts.py "dist/rpm-$CHANNEL-$arch" "$TAG" "$arch"
+          done
       - name: Sign packages and metadata
         env:
           GPG_KEY: ${{ secrets.GPG_KEY }}
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
-        run: bash scripts/sign.sh dist signed
+          CHANNEL: ${{ inputs.channel }}
+        run: |
+          for arch in x86_64 aarch64; do
+            bash scripts/sign.sh "dist/rpm-$CHANNEL-$arch" "signed/$arch" "$arch"
+          done
+          python3 scripts/assemble_snapshot.py signed snapshot
       - name: Publish verified snapshot
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -120,4 +142,4 @@ jobs:
           S3_BUCKET_NAME: ${{ secrets.S3_BUCKET_NAME }}
           S3_ENDPOINT_URL: ${{ secrets.S3_ENDPOINT_URL }}
           CHANNEL: ${{ inputs.channel }}
-        run: .venv/bin/python scripts/publish.py --channel "$CHANNEL" --snapshot signed
+        run: .venv/bin/python scripts/publish.py --channel "$CHANNEL" --snapshot snapshot

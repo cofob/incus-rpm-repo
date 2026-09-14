@@ -12,3 +12,8 @@ incus-agent --version
 /usr/libexec/incus/incusd --version
 test -f /usr/lib/systemd/system/incus.service
 test -d /var/lib/incus
+if [[ "$arch" == aarch64 ]]; then
+    rpm -q edk2-aarch64
+    test -f /usr/share/AAVMF/AAVMF_CODE.fd
+    grep -Fx 'Environment=INCUS_EDK2_PATH=/usr/share/AAVMF' /usr/lib/systemd/system/incus.service
+fi

@@ -6,7 +6,7 @@
 # Supplied by scripts/prepare.py from the verified upstream release.
 %{!?source_version:%global source_version 7.4}
 %{!?rpm_version:%global rpm_version 7.4.0}
-%{!?rpm_release:%global rpm_release 2}
+%{!?rpm_release:%global rpm_release 3}
 %{!?has_lxd_migrate:%global has_lxd_migrate 0}
 Version:        %{rpm_version}
 %global golicenses COPYING
@@ -223,7 +223,11 @@ Summary:        Incus guest agent
 License:        Apache-2.0
 
 # Virtual machine support requires additional packages
+%ifarch aarch64
+Recommends:     edk2-aarch64
+%else
 Recommends:     edk2-ovmf
+%endif
 Recommends:     xorriso
 Recommends:     qemu-audio-spice
 Recommends:     qemu-char-spice
@@ -296,6 +300,9 @@ install -m0755 -vp %{gobuilddir}/bin/* %{buildroot}%{_bindir}/
 install -d %{buildroot}%{_unitdir}
 install -m0644 -vp %{SOURCE101} %{buildroot}%{_unitdir}/
 install -m0644 -vp %{SOURCE102} %{buildroot}%{_unitdir}/
+%ifarch aarch64
+sed -i 's@INCUS_EDK2_PATH=/usr/share/edk2/ovmf@INCUS_EDK2_PATH=/usr/share/AAVMF@' %{buildroot}%{_unitdir}/incus.service
+%endif
 install -m0644 -vp %{SOURCE103} %{buildroot}%{_unitdir}/
 install -m0644 -vp %{SOURCE104} %{buildroot}%{_unitdir}/
 install -m0644 -vp %{SOURCE105} %{buildroot}%{_unitdir}/

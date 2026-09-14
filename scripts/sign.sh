@@ -4,6 +4,8 @@ set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 input=$(realpath "$1")
 output=$(realpath -m "$2")
+binary_arch=${3:-x86_64}
+[[ "$binary_arch" == x86_64 || "$binary_arch" == aarch64 ]]
 [[ -n ${GPG_KEY:-} && -n ${GPG_PASSPHRASE:-} ]]
 private=$(mktemp -d)
 chmod 700 "$private"
@@ -25,7 +27,7 @@ gpg --batch --list-secret-keys "$fingerprint" >/dev/null
 printf 'Incus RPM signing check\n' > "$private/probe"
 gpg --batch --yes --pinentry-mode loopback --passphrase-file "$SIGN_PASSWORD_FILE" \
     --local-user "$fingerprint" --detach-sign "$private/probe"
-mkdir -p "$output/x86_64/Packages" "$output/SRPMS/Packages" "$private/rpmdb"
+mkdir -p "$output/$binary_arch/Packages" "$output/SRPMS/Packages" "$private/rpmdb"
 rpm --dbpath "$private/rpmdb" --import "$root/keys/repository.asc"
 cat > "$private/gpg-wrapper" <<'EOF'
 #!/usr/bin/env bash
@@ -38,7 +40,7 @@ for package in "$input"/*.rpm; do
     arch=$(rpm -qp --qf '%{ARCH}' "$package")
     case "$package" in
         *.src.rpm) target="$output/SRPMS/Packages" ;;
-        *) [[ "$arch" == x86_64 || "$arch" == noarch ]]; target="$output/x86_64/Packages" ;;
+        *) [[ "$arch" == "$binary_arch" || "$arch" == noarch ]]; target="$output/$binary_arch/Packages" ;;
     esac
     cp "$package" "$target/"
     signed="$target/$(basename "$package")"
@@ -48,7 +50,7 @@ for package in "$input"/*.rpm; do
     count=$((count + 1))
 done
 [[ "$count" -ge 5 ]]
-for arch in x86_64 SRPMS; do
+for arch in "$binary_arch" SRPMS; do
     createrepo_c --checksum sha256 "$output/$arch"
     metadata="$output/$arch/repodata/repomd.xml"
     gpg --batch --yes --pinentry-mode loopback --passphrase-file "$SIGN_PASSWORD_FILE" \

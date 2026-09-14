@@ -4,7 +4,7 @@ set -euo pipefail
 cat > /etc/yum.repos.d/incus-test.repo <<'EOF'
 [incus-test]
 name=Incus signature test
-baseurl=file:///repo/x86_64
+baseurl=file:///repo/$basearch
 enabled=1
 gpgcheck=1
 repo_gpgcheck=1

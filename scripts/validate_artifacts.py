@@ -9,10 +9,14 @@ from releases import version, RPM_RELEASE
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def main(folder, tag):
+def main(folder, tag, architecture='x86_64'):
+    if architecture not in ('x86_64', 'aarch64'):
+        raise ValueError('Unsupported architecture')
     version(tag)
     folder = Path(folder)
     release_info = json.loads((folder / 'release.json').read_text())
+    if release_info.get('architecture') != architecture:
+        raise ValueError('Build architecture does not match selected architecture')
     if release_info['tag'] != tag or release_info['rpm_release'] != RPM_RELEASE:
         raise ValueError('Build release does not match selected release')
     dependencies = json.loads((ROOT / 'packaging/dependencies/provenance.json').read_text())
@@ -43,7 +47,7 @@ def main(folder, tag):
             if name not in identities:
                 raise ValueError('Unexpected source RPM')
             sources.add(name)
-        elif arch not in ('x86_64', 'noarch'):
+        elif arch not in (architecture, 'noarch'):
             raise ValueError('Unexpected RPM architecture')
         else:
             names.add(name)
