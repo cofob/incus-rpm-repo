@@ -1,0 +1,123 @@
+name: Build one Incus channel
+on:
+  workflow_call:
+    inputs:
+      channel:
+        type: string
+        required: true
+      build_only:
+        type: boolean
+        default: false
+    secrets:
+      AWS_ACCESS_KEY_ID:
+        required: false
+      AWS_SECRET_ACCESS_KEY:
+        required: false
+      AWS_REGION:
+        required: false
+      S3_BUCKET_NAME:
+        required: false
+      S3_ENDPOINT_URL:
+        required: false
+      GPG_KEY:
+        required: false
+      GPG_PASSPHRASE:
+        required: false
+permissions: {}
+jobs:
+  check:
+    name: Select release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      build: ${{ steps.release.outputs.build }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Find upstream release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHANNEL: ${{ inputs.channel }}
+          BUILD_ONLY: ${{ inputs.build_only }}
+        run: |
+          args=(--channel "$CHANNEL")
+          if [[ "$BUILD_ONLY" == true ]]; then args+=(--build-only); fi
+          python3 scripts/releases.py "${args[@]}"
+  build:
+    name: Build and test RPMs
+    needs: check
+    if: needs.check.outputs.build == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Build and test EL10 packages
+        env:
+          TAG: ${{ needs.check.outputs.tag }}
+        run: |
+          mkdir -p dist
+          docker run --rm --platform linux/amd64 \
+            -v "$PWD:/work:ro" -v "$PWD/dist:/output" \
+            quay.io/rockylinux/rockylinux:10@sha256:827d37bc128288ccf160ee318bb3cb92d591164cb217e92f8bc61e3982ae1834 \
+            bash /work/scripts/build.sh "$TAG"
+      - name: Test installation
+        run: |
+          docker run --rm --platform linux/amd64 \
+            -v "$PWD:/work:ro" -v "$PWD/dist:/packages:ro" \
+            quay.io/rockylinux/rockylinux:10@sha256:827d37bc128288ccf160ee318bb3cb92d591164cb217e92f8bc61e3982ae1834 \
+            bash /work/scripts/smoke.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: rpm-${{ inputs.channel }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
+  publish:
+    name: Sign and publish
+    needs: [check, build]
+    if: ${{ !inputs.build_only && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: rpm-${{ inputs.channel }}
+          path: dist
+      - name: Install signing tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rpm createrepo-c gnupg python3-venv
+          python3 -m venv .venv
+          .venv/bin/pip install boto3==1.42.49
+      - name: Validate build identity
+        env:
+          TAG: ${{ needs.check.outputs.tag }}
+        run: python3 scripts/validate_artifacts.py dist "$TAG"
+      - name: Sign packages and metadata
+        env:
+          GPG_KEY: ${{ secrets.GPG_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: bash scripts/sign.sh dist signed
+      - name: Publish verified snapshot
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          S3_BUCKET_NAME: ${{ secrets.S3_BUCKET_NAME }}
+          S3_ENDPOINT_URL: ${{ secrets.S3_ENDPOINT_URL }}
+          CHANNEL: ${{ inputs.channel }}
+        run: .venv/bin/python scripts/publish.py --channel "$CHANNEL" --snapshot signed

@@ -1,0 +1,52 @@
+name: Publish Incus RPMs
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Channel to check
+        type: choice
+        options: [all, latest, lts]
+        default: all
+      build_only:
+        description: Build and test without signing or publication
+        type: boolean
+        default: false
+permissions: {}
+concurrency:
+  group: incus-publication
+  cancel-in-progress: false
+jobs:
+  latest:
+    if: github.event_name == 'schedule' || inputs.channel == 'all' || inputs.channel == 'latest'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/channel.yml
+    with:
+      channel: latest
+      build_only: ${{ inputs.build_only || false }}
+    secrets:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      S3_BUCKET_NAME: ${{ secrets.S3_BUCKET_NAME }}
+      S3_ENDPOINT_URL: ${{ secrets.S3_ENDPOINT_URL }}
+      GPG_KEY: ${{ secrets.GPG_KEY }}
+      GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+  lts:
+    if: github.event_name == 'schedule' || inputs.channel == 'all' || inputs.channel == 'lts'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/channel.yml
+    with:
+      channel: lts
+      build_only: ${{ inputs.build_only || false }}
+    secrets:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      S3_BUCKET_NAME: ${{ secrets.S3_BUCKET_NAME }}
+      S3_ENDPOINT_URL: ${{ secrets.S3_ENDPOINT_URL }}
+      GPG_KEY: ${{ secrets.GPG_KEY }}
+      GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}

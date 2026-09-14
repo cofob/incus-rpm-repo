@@ -1,0 +1,59 @@
+name: Validate RPM automation
+on:
+  pull_request:
+  push:
+permissions: {}
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  lint:
+    name: Workflow and script checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # main
+      - name: Check workflows and scripts
+        run: |
+          nix-shell -p zizmor actionlint shellcheck --run \
+            'zizmor .github/workflows && actionlint && shellcheck scripts/*.sh'
+          python3 -m unittest discover -s tests -v
+  packages:
+    name: Initial release build tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        tag: [v7.4.0, v7.0.1]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Build and install both initial releases
+        env:
+          TAG: ${{ matrix.tag }}
+        run: |
+          mkdir -p dist
+          docker run --rm --platform linux/amd64 \
+            -v "$PWD:/work:ro" -v "$PWD/dist:/output" \
+            quay.io/rockylinux/rockylinux:10@sha256:827d37bc128288ccf160ee318bb3cb92d591164cb217e92f8bc61e3982ae1834 \
+            bash /work/scripts/build.sh "$TAG"
+          docker run --rm --platform linux/amd64 \
+            -v "$PWD:/work:ro" -v "$PWD/dist:/packages:ro" \
+            quay.io/rockylinux/rockylinux:10@sha256:827d37bc128288ccf160ee318bb3cb92d591164cb217e92f8bc61e3982ae1834 \
+            bash /work/scripts/smoke.sh
+      - name: Test protected-key signing and tamper rejection
+        env:
+          TEST_DNF_DOCKER: true
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rpm createrepo-c gnupg
+          bash scripts/test-signing.sh

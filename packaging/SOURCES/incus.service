@@ -1,0 +1,23 @@
+[Unit]
+Description=Incus - Daemon
+After=network-online.target openvswitch-switch.service lxcfs.service incus.socket
+Requires=network-online.target lxcfs.service incus.socket
+Documentation=man:incusd(1)
+
+[Service]
+Environment=INCUS_DOCUMENTATION=/usr/share/doc/incus-doc/html
+Environment=INCUS_EDK2_PATH=/usr/share/edk2/ovmf
+Environment=INCUS_SOCKET=/run/incus/unix.socket
+ExecStart=/usr/libexec/incus/incusd --group incus-admin
+ExecStartPost=/usr/libexec/incus/incusd waitready --timeout=600
+KillMode=process
+TimeoutStartSec=600s
+TimeoutStopSec=30s
+Restart=on-failure
+Delegate=yes
+LimitNOFILE=1048576
+LimitNPROC=infinity
+TasksMax=infinity
+
+[Install]
+Also=incus-startup.service incus.socket
