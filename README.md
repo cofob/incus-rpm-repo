@@ -18,11 +18,7 @@ sudo dnf config-manager --set-enabled crb
 ```
 
 This repository supplies `cowsql` and `raft`. COPR is not required.
-If you previously enabled it, disable it before upgrading:
-
-```sh
-sudo dnf config-manager --set-disabled 'copr:copr.fedorainfracloud.org:neelc:incus'
-```
+For an existing installation, follow the [COPR migration guide](docs/migrate-from-copr.md).
 
 Download the signing key and check its fingerprint:
 
