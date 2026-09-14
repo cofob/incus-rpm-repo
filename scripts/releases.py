@@ -3,12 +3,14 @@
 import argparse
 import json
 import os
+from pathlib import Path
 import re
 import urllib.error
 import urllib.request
 
 PUBLIC = 'https://incusrpmrepo.cofob.dev'
 TAG = re.compile(r'^v(\d+)\.(\d+)\.(\d+)$')
+RPM_RELEASE = json.loads((Path(__file__).resolve().parents[1] / 'packaging/provenance.json').read_text())['rpm_release']
 
 
 def version(tag):
@@ -42,14 +44,17 @@ def get_json(url, token=None):
         return json.load(response)
 
 
-def needs_build(tag, state):
+def needs_build(tag, state, rpm_release=RPM_RELEASE):
     if state is None:
         return True
     # A missing or malformed field is an error, not an empty repository.
     old = state['tag']
     if version(old) > version(tag):
         raise ValueError('Refusing a channel downgrade')
-    return old != tag
+    previous_release = state.get('rpm_release', 1)
+    if old == tag and previous_release > rpm_release:
+        raise ValueError('Refusing a package release downgrade')
+    return old != tag or previous_release != rpm_release
 
 
 def main():

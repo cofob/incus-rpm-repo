@@ -11,7 +11,7 @@ import sys
 import tarfile
 import tempfile
 import urllib.request
-from releases import version
+from releases import version, RPM_RELEASE
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -75,10 +75,11 @@ def main(tag, top):
         shutil.copy2(item, top / 'SOURCES' / item.name)
     spec = (ROOT / 'packaging/incus.spec').read_text()
     spec = (f'%global source_version {source_version}\n%global rpm_version {tag[1:]}\n'
+            f'%global rpm_release {RPM_RELEASE}\n'
             f'%global has_lxd_migrate {int(has_migrate)}\n' + spec)
     (top / 'SPECS/incus.spec').write_text(spec)
     (top / 'release.json').write_text(json.dumps({'tag': tag, 'source_sha256': hashlib.sha256(source.read_bytes()).hexdigest(),
-                                               'go_minimum': required}) + '\n')
+                                               'go_minimum': required, 'rpm_release': RPM_RELEASE}) + '\n')
 
 
 if __name__ == '__main__':

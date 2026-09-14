@@ -2,5 +2,6 @@
   "url": "https://download.copr.fedorainfracloud.org/results/neelc/incus/rhel+epel-10-x86_64/10418921-incus/incus-6.23-3.el10.src.rpm",
   "sha256": "77a9db32eee6d625f02a7d54a3c235e198833e4612835d69b088425fe3abf603",
   "upstream_signer": "602F567663E593BCBD14F338C638974D64792D67",
-  "repository_signer": "06FB41B7A8B4AAD8E9820FAC3BA91725C212825F"
+  "repository_signer": "06FB41B7A8B4AAD8E9820FAC3BA91725C212825F",
+  "rpm_release": 2
 }

@@ -6,13 +6,14 @@
 # Supplied by scripts/prepare.py from the verified upstream release.
 %{!?source_version:%global source_version 7.4}
 %{!?rpm_version:%global rpm_version 7.4.0}
+%{!?rpm_release:%global rpm_release 2}
 %{!?has_lxd_migrate:%global has_lxd_migrate 0}
 Version:        %{rpm_version}
 %global golicenses COPYING
 %global gobuilddir %{_builddir}/incus-output
 
 Name:           incus
-Release:        1%{?dist}
+Release:        %{rpm_release}%{?dist}
 Summary:        Powerful system container and virtual machine manager
 License:        Apache-2.0
 URL:            https://linuxcontainers.org/incus

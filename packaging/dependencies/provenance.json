@@ -1,0 +1,20 @@
+{
+  "raft": {
+    "version": "0.22.1",
+    "release": "2.el10",
+    "filename": "v0.22.1.tar.gz",
+    "url": "https://github.com/cowsql/raft/archive/refs/tags/v0.22.1.tar.gz",
+    "sha256": "385f91a0b542ebe8b81c8f8500310dcd575fd028ea0cd2ede8807fa920dcf604",
+    "baseline_srpm_url": "https://download.copr.fedorainfracloud.org/results/neelc/incus/rhel+epel-10-x86_64/09530410-raft/raft-0.22.1-1.el10.src.rpm",
+    "baseline_srpm_sha256": "4bd17efa1e73df7db3af70b92b38e08a22d8a43c11fe57487268ce36b18461e4"
+  },
+  "cowsql": {
+    "version": "1.15.9",
+    "release": "3.el10",
+    "filename": "cowsql-1.15.9.tar.gz",
+    "url": "https://github.com/cowsql/cowsql/archive/refs/tags/v1.15.9.tar.gz",
+    "sha256": "257aee775f68fd145bfae012dc394fdf62c2f97f0360b0bcf6bd1f66bc58ca04",
+    "baseline_srpm_url": "https://download.copr.fedorainfracloud.org/results/neelc/incus/rhel+epel-10-x86_64/09530413-cowsql/cowsql-1.15.9-2.el10.src.rpm",
+    "baseline_srpm_sha256": "1e7eddc8d8fd2a4f0beb79cfe337e2b13c12d8f4fe6dd4457065461198e370b7"
+  }
+}

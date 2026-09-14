@@ -10,18 +10,19 @@ Both channels can advance to a new major version. Enable only one.
 
 ## Install
 
-On Rocky Linux 10, enable CRB, EPEL, and COPR for dependencies such as cowsql
-and raft. Exclude Incus packages **only from COPR**, so they come from this repo:
+On Rocky Linux 10, enable EPEL and CRB:
 
 ```sh
 sudo dnf install -y dnf-plugins-core epel-release
 sudo dnf config-manager --set-enabled crb
-sudo dnf copr enable -y neelc/incus rhel+epel-10-x86_64
-sudo dnf config-manager --save \
-  --setopt='copr:copr.fedorainfracloud.org:neelc:incus.excludepkgs=incus*'
 ```
 
-Keep COPR enabled for dependencies. Do not set a global `exclude=incus*`.
+This repository supplies `cowsql` and `raft`. COPR is not required.
+If you previously enabled it, disable it before upgrading:
+
+```sh
+sudo dnf config-manager --set-disabled 'copr:copr.fedorainfracloud.org:neelc:incus'
+```
 
 Download the signing key and check its fingerprint:
 
@@ -82,7 +83,10 @@ Push to the default branch to enable scheduled runs. For manual runs, select
 
 Packaging derives from the neelc/incus EL10 SRPM recorded in
 [packaging/provenance.json](packaging/provenance.json). CI builds both initial
-releases, tests installation, and checks signing and tamper rejection.
+releases, builds and tests the pinned [dependency sources](packaging/dependencies/provenance.json),
+and checks installation without COPR, signing, and tamper rejection.
+Bump `rpm_release` in `packaging/provenance.json` when packaging or dependencies
+change; this rebuilds both channels even if upstream versions are unchanged.
 
 ```sh
 python3 -m unittest discover -s tests -v

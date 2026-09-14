@@ -1,19 +1,27 @@
 #!/usr/bin/env python3
-"""Check the identity of downloaded RPMs before signing."""
+"""Check the identity of every Incus and dependency RPM before signing."""
 import json
 from pathlib import Path
 import subprocess
 import sys
-from releases import version
+from releases import version, RPM_RELEASE
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def main(folder, tag):
     version(tag)
     folder = Path(folder)
-    if json.loads((folder / 'release.json').read_text())['tag'] != tag:
+    release_info = json.loads((folder / 'release.json').read_text())
+    if release_info['tag'] != tag or release_info['rpm_release'] != RPM_RELEASE:
         raise ValueError('Build release does not match selected release')
-    names = set()
-    source = False
+    dependencies = json.loads((ROOT / 'packaging/dependencies/provenance.json').read_text())
+    identities = {'incus': (tag[1:], f'{RPM_RELEASE}.el10')}
+    identities.update({name: (package['version'], package['release']) for name, package in dependencies.items()})
+    required = {'incus', 'incus-client', 'incus-tools', 'incus-agent',
+                'cowsql', 'cowsql-devel', 'raft', 'raft-devel'}
+    allowed = required | {name + suffix for name in required for suffix in ('-debuginfo', '-debugsource')}
+    names, sources, seen = set(), set(), set()
     for path in folder.iterdir():
         if path.is_symlink() or not path.is_file():
             raise ValueError('Invalid artifact entry')
@@ -23,15 +31,23 @@ def main(folder, tag):
             raise ValueError('Unexpected artifact')
         name, ver, release, arch = subprocess.check_output(
             ['rpm', '-qp', '--qf', '%{NAME}\t%{VERSION}\t%{RELEASE}\t%{ARCH}', str(path)], text=True).split('\t')
-        if not (name == 'incus' or name.startswith('incus-')) or ver != tag[1:] or release != '1.el10':
+        base = name.split('-')[0]
+        if name not in allowed or identities.get(base) != (ver, release):
             raise ValueError('Unexpected RPM identity')
-        if path.name.endswith('.src.rpm'):
-            source = True
+        source = path.name.endswith('.src.rpm')
+        file_arch = 'src' if source else arch
+        if path.name != f'{name}-{ver}-{release}.{file_arch}.rpm' or (name, file_arch) in seen:
+            raise ValueError('Unexpected or duplicate RPM filename')
+        seen.add((name, file_arch))
+        if source:
+            if name not in identities:
+                raise ValueError('Unexpected source RPM')
+            sources.add(name)
         elif arch not in ('x86_64', 'noarch'):
             raise ValueError('Unexpected RPM architecture')
         else:
             names.add(name)
-    if not source or not {'incus', 'incus-client', 'incus-tools', 'incus-agent'} <= names:
+    if sources != set(identities) or not required <= names:
         raise ValueError('Missing required packages')
 
 

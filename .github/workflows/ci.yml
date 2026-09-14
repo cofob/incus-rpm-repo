@@ -50,10 +50,12 @@ jobs:
             -v "$PWD:/work:ro" -v "$PWD/dist:/packages:ro" \
             quay.io/rockylinux/rockylinux:10@sha256:827d37bc128288ccf160ee318bb3cb92d591164cb217e92f8bc61e3982ae1834 \
             bash /work/scripts/smoke.sh
-      - name: Test protected-key signing and tamper rejection
+      - name: Validate packages and test signed installation without COPR
         env:
           TEST_DNF_DOCKER: true
+          TAG: ${{ matrix.tag }}
         run: |
           sudo apt-get update
           sudo apt-get install -y rpm createrepo-c gnupg
+          python3 scripts/validate_artifacts.py dist "$TAG"
           bash scripts/test-signing.sh

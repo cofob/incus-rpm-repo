@@ -21,12 +21,12 @@ if [[ "$1" == fixture ]]; then
     dnf -y --disablerepo='*' --enablerepo=incus-test install incus-signing-test
 else
     bash /work/scripts/dependencies.sh
-    copr='copr:copr.fedorainfracloud.org:neelc:incus'
-    # COPR must supply dependencies without competing for Incus packages.
-    candidates=$(dnf -q repoquery --available --repo="$copr" 'incus*')
-    [[ -z "$candidates" ]]
+    # Both libraries must be supplied by this channel, with no COPR enabled.
+    if dnf -q repolist --enabled | grep -qi copr; then
+        echo 'Unexpected COPR repository' >&2; exit 1
+    fi
     for dependency in cowsql raft; do
-        candidates=$(dnf -q repoquery --available --repo="$copr" "$dependency")
+        candidates=$(dnf -q repoquery --available --repo=incus-test "$dependency")
         [[ -n "$candidates" ]]
     done
     dnf -y install incus incus-agent incus-tools

@@ -8,9 +8,11 @@ from unittest.mock import patch
 import urllib.error
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from releases import select, needs_build, version, main as release_main
+from releases import select, needs_build, version, main as release_main, RPM_RELEASE
 from publish import publish, repo_file, verify_public
 from prepare import go_version
+from validate_artifacts import main as validate_artifacts
+from prepare_dependencies import main as prepare_dependencies
 
 
 def release(tag, name='', **kwargs):
@@ -37,7 +39,10 @@ class ReleaseTests(unittest.TestCase):
 
     def test_first_same_and_new(self):
         self.assertTrue(needs_build('v7.4.0', None))
-        self.assertFalse(needs_build('v7.4.0', {'tag': 'v7.4.0'}))
+        self.assertFalse(needs_build('v7.4.0', {'tag': 'v7.4.0', 'rpm_release': RPM_RELEASE}))
+        self.assertTrue(needs_build('v7.4.0', {'tag': 'v7.4.0'}))
+        with self.assertRaises(ValueError):
+            needs_build('v7.4.0', {'tag': 'v7.4.0', 'rpm_release': RPM_RELEASE + 1})
         self.assertTrue(needs_build('v7.4.0', {'tag': 'v7.3.0'}))
         with self.assertRaises(ValueError):
             needs_build('v7.3.0', {'tag': 'v7.4.0'})
@@ -83,6 +88,55 @@ class DiscoveryTests(unittest.TestCase):
         output, calls = self.run_check([[release('v7.4.0')]], ['--build-only'])
         self.assertEqual(calls, 1)
         self.assertIn('build=true', output)
+
+    def test_current_packaging_is_skipped(self):
+        output, _ = self.run_check([[release('v7.4.0')], {'tag': 'v7.4.0', 'rpm_release': RPM_RELEASE}])
+        self.assertIn('build=false', output)
+
+
+class ArtifactTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.folder = Path(self.temp.name)
+        (self.folder / 'release.json').write_text(json.dumps({'tag': 'v7.4.0', 'rpm_release': RPM_RELEASE}))
+        self.identities = {}
+        groups = [('incus', '7.4.0', f'{RPM_RELEASE}.el10', ['client', 'tools', 'agent']),
+                  ('raft', '0.22.1', '2.el10', ['devel']), ('cowsql', '1.15.9', '3.el10', ['devel'])]
+        for name, ver, rel, suffixes in groups:
+            for package, arch in [(name, 'src'), (name, 'x86_64'),
+                                  *[(name + '-' + suffix, 'x86_64') for suffix in suffixes]]:
+                path = self.folder / f'{package}-{ver}-{rel}.{arch}.rpm'
+                path.touch()
+                self.identities[str(path)] = '\t'.join((package, ver, rel, arch))
+
+    def validate(self):
+        with patch('validate_artifacts.subprocess.check_output',
+                   side_effect=lambda args, **_: self.identities[args[-1]]):
+            validate_artifacts(self.folder, 'v7.4.0')
+
+    def test_complete_channel_is_accepted(self):
+        self.validate()
+
+    def test_missing_dependency_and_source_are_rejected(self):
+        for name in ('raft-0.22.1-2.el10.x86_64.rpm', 'cowsql-1.15.9-3.el10.src.rpm'):
+            with self.subTest(name=name):
+                path = self.folder / name
+                path.unlink()
+                with self.assertRaisesRegex(ValueError, 'Missing required'):
+                    self.validate()
+                path.touch()
+
+    def test_wrong_dependency_version_is_rejected(self):
+        path = str(self.folder / 'raft-0.22.1-2.el10.x86_64.rpm')
+        self.identities[path] = 'raft\t0.99.0\t2.el10\tx86_64'
+        with self.assertRaisesRegex(ValueError, 'Unexpected RPM identity'):
+            self.validate()
+
+    def test_dependency_checksum_is_enforced(self):
+        with patch('prepare_dependencies.download', side_effect=lambda _url, path: path.write_bytes(b'changed')):
+            with self.assertRaisesRegex(RuntimeError, 'source checksum mismatch'):
+                prepare_dependencies(self.folder)
 
 
 class PublicDownloadTests(unittest.TestCase):
@@ -131,7 +185,7 @@ class PublicationTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.snapshot = Path(self.temp.name)
-        (self.snapshot / 'release.json').write_text(json.dumps({'tag': 'v7.4.0'}))
+        (self.snapshot / 'release.json').write_text(json.dumps({'tag': 'v7.4.0', 'rpm_release': RPM_RELEASE}))
         (self.snapshot / 'rpm').write_bytes(b'rpm')
         self.s3 = FakeS3()
 
@@ -140,6 +194,15 @@ class PublicationTests(unittest.TestCase):
         self.assertEqual(self.s3.writes[-1], 'state/latest.json')
         writes = len(self.s3.writes)
         publish(self.s3, 'bucket', self.snapshot, 'latest', '2-1', lambda *_: None)
+        self.assertEqual(len(self.s3.writes), writes)
+
+    def test_old_packaging_is_republished_once(self):
+        self.s3.objects['state/latest.json'] = json.dumps({'tag': 'v7.4.0'}).encode()
+        publish(self.s3, 'bucket', self.snapshot, 'latest', '3-1', lambda *_: None)
+        state = json.loads(self.s3.objects['state/latest.json'])
+        self.assertEqual(state['rpm_release'], RPM_RELEASE)
+        writes = len(self.s3.writes)
+        publish(self.s3, 'bucket', self.snapshot, 'latest', '4-1', lambda *_: None)
         self.assertEqual(len(self.s3.writes), writes)
 
     def test_failed_upload_preserves_channel_then_retry(self):

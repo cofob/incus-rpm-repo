@@ -59,7 +59,7 @@ def publish(s3, bucket, snapshot, channel, run, verify=verify_public):
         previous = json.loads(s3.get_object(Bucket=bucket, Key=state_key)['Body'].read())
     except s3.exceptions.NoSuchKey:
         previous = None
-    if not needs_build(release['tag'], previous):
+    if not needs_build(release['tag'], previous, release['rpm_release']):
         print('Release already published; no change')
         return
     prefix = f'snapshots/{channel}/{release["tag"]}/{run}'
