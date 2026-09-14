@@ -8,7 +8,6 @@ top=/build/rpmbuild
 bash "$root/scripts/dependencies.sh"
 dnf install -y rpm-build rpmdevtools golang gcc gcc-c++ make gnupg2 python3 \
   tar xz diffutils findutils systemd-rpm-macros
-python3 tar xz diffutils findutils
 python3 "$root/scripts/prepare.py" "$1" "$top"
 dnf builddep -y --define "_topdir $top" "$top/SPECS/incus.spec"
 # Compile as a dedicated user without publishing credentials.
